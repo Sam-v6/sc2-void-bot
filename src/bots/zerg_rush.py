@@ -25,11 +25,11 @@ class ZergRushBot(VoidBotBase):
     def __init__(self):
         self.on_end_called = False
 
-    async def on_start(self):
+    async def custom_on_start(self):
         self.client.game_step = 2
 
     # pylint: disable=R0912
-    async def on_step(self, iteration):
+    async def custom_on_step(self, iteration):
         if iteration == 0:
             await self.chat_send("(glhf)")
 

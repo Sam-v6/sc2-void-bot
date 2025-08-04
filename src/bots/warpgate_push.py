@@ -36,7 +36,7 @@ class WarpGateBot(VoidBotBase):
                 warpgate.warp_in(UnitTypeId.STALKER, placement)
 
     # pylint: disable=R0912
-    async def on_step(self, iteration):
+    async def custom_on_step(self, iteration):
         await self.distribute_workers()
 
         if not self.townhalls.ready:

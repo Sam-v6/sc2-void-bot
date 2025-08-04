@@ -6,9 +6,11 @@ Bot has a chance to win against elite (=Difficulty.VeryHard) zerg AI
 Bot made by Burny
 """
 
+# Base imports
 import random
 from typing import Set
 
+# SC2 imports
 from sc2 import maps
 from sc2.bot_ai import BotAI
 from sc2.data import Difficulty, Race
@@ -20,16 +22,21 @@ from sc2.position import Point2
 from sc2.unit import Unit
 from sc2.units import Units
 
+# Local imports
+from common.void_bot_base import VoidBotBase
 
 # pylint: disable=W0231
-class MassReaperBot(BotAI):
+class MassReaperBot(VoidBotBase):
 
     def __init__(self):
         # Select distance calculation method 0, which is the pure python distance calculation without caching or indexing, using math.hypot(), for more info see bot_ai_internal.py _distances_override_functions() function
         self.distance_calculation_method = 3
 
+    async def custom_on_start(self):
+        pass
+
     # pylint: disable=R0912,R0914
-    async def on_step(self, iteration):
+    async def custom_on_step(self, iteration):
         # Benchmark and print duration time of the on_step method based on "self.distance_calculation_method" value
         # logger.info(self.time_formatted, self.supply_used, self.step_time[1])
         """
@@ -383,6 +390,8 @@ class MassReaperBot(BotAI):
                         else:
                             w.gather(mf)
 
+    async def custom_on_end(self, game_result):
+        pass
 
 def main():
     # Multiple difficulties for enemy bots available https://github.com/Blizzard/s2client-api/blob/ce2b3c5ac5d0c85ede96cef38ee7ee55714eeb2f/include/sc2api/sc2_gametypes.h#L30

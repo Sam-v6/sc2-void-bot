@@ -14,11 +14,11 @@ from common.void_bot_base import VoidBotBase
 
 class ProxyRaxBot(VoidBotBase):
 
-    async def on_start(self):
+    async def custom_on_start(self):
         self.client.game_step = 2
 
     # pylint: disable=R0912
-    async def on_step(self, iteration):
+    async def custom_on_step(self, iteration):
         # If we don't have a townhall anymore, send all units to attack
         ccs: Units = self.townhalls(UnitTypeId.COMMANDCENTER)
         if not ccs:
