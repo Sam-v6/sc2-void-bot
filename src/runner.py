@@ -23,10 +23,10 @@ from bots.one_base_battlecruiser import BCRushBot
 from bots.zerg_rush import ZergRushBot
 import pandas as pd
 
-def run_single_game(bot_class_name, race, strategy_name, map_name, dev):
-    
+def run_single_game(bot_class_name, bot_race, strat_name, opponent_race, difficulty, map_name, dev):
+
     # Set up the bot instance
-    bot_instance = Bot(race, bot_class_name())
+    bot_instance = Bot(bot_race, bot_class_name())
 
     # Optional: DEV mode to skip logging
     if dev:
@@ -34,21 +34,21 @@ def run_single_game(bot_class_name, race, strategy_name, map_name, dev):
 
     # Output file paths
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    replay_name = f"{strategy_name}_{map_name}_{timestamp}.SC2Replay"
+    replay_name = f"{strat_name}_{map_name}_{timestamp}.SC2Replay"
     replay_path = os.path.join(os.getenv("VOID_BOT_HOME"), "replays", replay_name)
 
     try:
-        print(f'Running {strategy_name} strategy with {map_name}...')
+        print(f'Running {strat_name} on {map_name} vs {opponent_race}-{difficulty}...')
         result = run_game(
             maps.get(map_name),
-            [bot_instance, Computer(Race.Protoss, Difficulty.Medium)],
+            [bot_instance, Computer(opponent_race, difficulty)],
             realtime=False,
             save_replay_as=replay_path,
         )
-        return (map_name, strategy_name, result.name)
+        return (strat_name, opponent_race, difficulty, map_name, result.name)
     except Exception as e:
         print(f"Error running {strategy_name} on {map_name}: {e}")
-        return (map_name, strategy_name, "ERROR")
+        return (strat_name, opponent_race, difficulty, map_name, "ERROR")
 
 if __name__ == "__main__":
 
@@ -71,6 +71,20 @@ if __name__ == "__main__":
         (ZergRushBot, Race.Zerg, "zergling_rush"),
     ]
 
+    # Races
+    races = [Race.Terran, Race.Protoss, Race.Zerg]
+
+    # Difficulty
+    difficulties = [
+        Difficulty.VeryEasy,
+        Difficulty.Easy,
+        Difficulty.Medium,
+        Difficulty.MediumHard,
+        Difficulty.Hard,
+        Difficulty.Harder,
+        Difficulty.VeryHard
+        ]
+
     # Get map list
     ladder_maps = []
     map_path = os.path.join(os.getenv("SC2PATH"), "Maps", "2025S2Maps")
@@ -80,15 +94,17 @@ if __name__ == "__main__":
 
     # Prepare job list (each is a tuple of inputs to `run_single_game`)
     jobs = []
-    for bot_class, race, name in bots:
-        for map_name in ladder_maps:
-            jobs.append((bot_class, race, name, map_name, args.dev))
+    for bot_class, bot_race, strat_name in bots:
+        for opponent_race in races:
+            for difficulty in difficulties:
+                for map_name in ladder_maps:
+                    jobs.append((bot_class, bot_race, strat_name, opponent_race, difficulty, map_name, args.dev))
 
     # Run in parallel
     with Pool(processes=cpus) as pool:
         results = pool.starmap(run_single_game, jobs)
 
     # Save results
-    df = pd.DataFrame(results, columns=['map', 'bot', 'result'])
+    df = pd.DataFrame(results, columns=['bot_strategy', 'opponent_race', 'difficulty', 'map', 'result'])
     df.to_csv(os.path.join(os.getenv("VOID_BOT_HOME"), "logs", "master_results.csv"), index=False)
 
