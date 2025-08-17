@@ -9,7 +9,9 @@ from sc2.player import Bot, Computer
 import os
 from datetime import datetime
 import argparse
-from multiprocessing import Pool
+import multiprocessing as mp
+from queue import Empty
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Additional imports
 import pandas as pd
@@ -23,16 +25,15 @@ from bots.one_base_battlecruiser import BCRushBot
 from bots.zerg_rush import ZergRushBot
 import pandas as pd
 
-def run_single_game(bot_class_name, bot_race, strat_name, opponent_race, difficulty, map_name, dev):
 
-    # Set up the bot instance
+TIMEOUT = (60*5)  # seconds
+
+def run_single_game(bot_class_name, bot_race, strat_name, opponent_race, difficulty, map_name, dev):
     bot_instance = Bot(bot_race, bot_class_name())
 
-    # Optional: DEV mode to skip logging
     if dev:
         os.environ["DEV"] = "1"
 
-    # Output file paths
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     replay_name = f"{strat_name}_{map_name}_{timestamp}.SC2Replay"
     replay_path = os.path.join(os.getenv("VOID_BOT_HOME"), "replays", replay_name)
@@ -47,18 +48,65 @@ def run_single_game(bot_class_name, bot_race, strat_name, opponent_race, difficu
         )
         return (strat_name, opponent_race, difficulty, map_name, result.name)
     except Exception as e:
-        print(f"Error running {strategy_name} on {map_name}: {e}")
+        print(f"Error running {strat_name} on {map_name}: {e}")
         return (strat_name, opponent_race, difficulty, map_name, "ERROR")
+
+def _child(q, job):
+    """
+    Runs the actual child job with some exception handling
+    """
+    bot_class, bot_race, strat_name, opponent_race, difficulty, map_name, dev = job
+    try:
+        res = run_single_game(bot_class, bot_race, strat_name, opponent_race, difficulty, map_name, dev)
+        # res is already a 5-tuple in both success and error paths above
+        q.put(res)
+    except Exception as e:
+        q.put((strat_name, opponent_race, difficulty, map_name, f"EXCEPTION:{e!r}"))
+
+def run_with_hard_timeout(job, seconds=TIMEOUT):
+    """
+    This fcn serves as the lightweight thread supervisor/ochestrator that spawns a child process which runs a game. If this process exceeds a timeout, the process will be killed
+    """
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    p = ctx.Process(target=_child, args=(q, job), daemon=False)
+    p.start()
+    p.join(seconds)
+
+    bot_class, bot_race, strat_name, opponent_race, difficulty, map_name, dev = job
+
+    # Will try to terminate gracefully, if that doesn't work then we will hard kill it
+    if p.is_alive():
+        try:
+            p.terminate()
+            p.join(1.0)
+            if p.is_alive():
+                # Escalate if still stubborn
+                p.kill()
+                p.join(0.5)
+        finally:
+            pass
+        return (strat_name, opponent_race, difficulty, map_name, "TIMEOUT")
+
+    try:
+        res = q.get(timeout=1.0)
+        return res if isinstance(res, tuple) and len(res) == 5 else \
+               (strat_name, opponent_race, difficulty, map_name, f"BAD_RESULT:{res!r}")
+    except Empty:
+        return (strat_name, opponent_race, difficulty, map_name, "NO_RESULT")
 
 if __name__ == "__main__":
 
+    ##############################################################
+    # Setup
+    ##############################################################
     # Get the args
+    # --dev will enable logging and replays
     parser = argparse.ArgumentParser()
     parser.add_argument("--dev", action="store_true", help="Run in dev mode (no logging)")
     args = parser.parse_args()
-    cpus = os.cpu_count()//2
 
-    # Ensure paths exist
+    # Create the log and replay dirs
     os.makedirs(os.path.join(os.getenv("VOID_BOT_HOME"), "logs"), exist_ok=True)
     os.makedirs(os.path.join(os.getenv("VOID_BOT_HOME"), "replays"), exist_ok=True)
 
@@ -100,11 +148,29 @@ if __name__ == "__main__":
                 for map_name in ladder_maps:
                     jobs.append((bot_class, bot_race, strat_name, opponent_race, difficulty, map_name, args.dev))
 
-    # Run in parallel
-    with Pool(processes=cpus) as pool:
-        results = pool.starmap(run_single_game, jobs)
+    ##############################################################
+    # Multiprocessing
+    ##############################################################
+    cpus = max(1,os.cpu_count()//2)
 
-    # Save results
-    df = pd.DataFrame(results, columns=['bot_strategy', 'opponent_race', 'difficulty', 'map', 'result'])
-    df.to_csv(os.path.join(os.getenv("VOID_BOT_HOME"), "logs", "master_results.csv"), index=False)
+    # This general approach works by:
+    # -> Having 16 threads that work as lightweight supervisors, for each thread
+    # ---> Spawns a child process that runs a single SC2 game (in our job list)
+    # In a basic pool setup we cant have a timeout error but it will still allow jobs to run in the background until whole pool times out, in this setup we can actually kill discrete games that have exceeded our timeout, basically more efficient
+    results = []
+    try:
+        with ThreadPoolExecutor(max_workers=cpus) as ex:
+            futures = [ex.submit(run_with_hard_timeout, job, TIMEOUT) for job in jobs]
+            for fut in as_completed(futures):
+                results.append(fut.result())
+    except KeyboardInterrupt:
+        # Stop accepting new work and try to cancel what we can
+        # (futures still running will be handled by process timeouts)
+        pass
+    finally:
+        # Always persist what we have
+        df = pd.DataFrame(results, columns=['bot_strategy','opponent_race','difficulty','map','result'])
+        out = os.path.join(os.getenv("VOID_BOT_HOME"), "logs", "master_results.csv")
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        df.to_csv(out, index=False)
 
