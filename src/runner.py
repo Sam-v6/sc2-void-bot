@@ -133,6 +133,20 @@ if __name__ == "__main__":
         Difficulty.VeryHard
         ]
 
+
+    # Simple
+    bots = [
+        (ZergRushBot, Race.Zerg, "zergling_rush"),
+    ]
+
+    # Races
+    races = [Race.Terran]
+
+    # Difficulty
+    difficulties = [
+        Difficulty.VeryHard
+        ]
+
     # Get map list
     ladder_maps = []
     map_path = os.path.join(os.getenv("SC2PATH"), "Maps", "2025S2Maps")
